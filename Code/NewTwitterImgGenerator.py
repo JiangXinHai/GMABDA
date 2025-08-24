@@ -39,8 +39,8 @@ class Image2ImageGenerator:
         return images, [False] * len(images)
     
     def generate_from_image_and_text(self, image, prompt, negative_prompt="", 
-                                    strength=0.8, num_inference_steps=250,
-                                    guidance_scale=15, num_images=5):
+                                    strength=0.8, num_inference_steps=450,
+                                    guidance_scale=15, num_images=1):
         """
         通过现有图像和文本提示生成新图像（图像编辑）
         
@@ -76,7 +76,7 @@ class Image2ImageGenerator:
             
         return images
     
-    def save_images(self, images, output_dir="/home/jiangxinhai/GMABDA/Data/twitter2015_images/generator_img", prefix="edited"):
+    def save_images(self, images, output_dir: str, prefix: str):
         """
         保存生成的图像
         
@@ -86,9 +86,7 @@ class Image2ImageGenerator:
             prefix: 文件名前缀
         """
         os.makedirs(output_dir, exist_ok=True)
-        
-        for i, img in enumerate(images):
-            img.save(f"{output_dir}/{prefix}_{i}.png")
+        images.save(f"{output_dir}/{prefix}.png")
         print(f"已保存 {len(images)} 张图像到 {output_dir}")
 
 

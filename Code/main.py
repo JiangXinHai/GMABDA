@@ -6,7 +6,10 @@ if __name__ == "__main__":
     # 配置参数
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     API_KEY = "wWdRvAHpLUMBHmZUoEVo:JFwiXKjNFxEPNkLKhByj"  # 替换为你的大模型 API密钥
-    OUTPUT_DIR = os.path.join(cur_dir,"../Data/twitter2015/generator_text")  # 输出目录
+    OUTPUT_DIR_TEXT = os.path.join(cur_dir,"../Data/twitter2015")  # 输出目录
+    output_path_text=os.path.join(OUTPUT_DIR_TEXT, "generator_text/new_tweets_dev_01.tsv")
+    OUTPUT_DIR_IMG = os.path.join(cur_dir, "../Data/twitter2015_images")
+    output_path_img = os.path.join(OUTPUT_DIR_IMG, "generator_img/new_imgs_dev_01")
     # print(cur_dir)
     DATA_PATHS = {
         "dev":   os.path.join(cur_dir,"../Data/twitter2015/dev.tsv"),    # 替换为你的验证集路径
