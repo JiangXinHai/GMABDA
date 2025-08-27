@@ -3,18 +3,47 @@ import json
 import requests
 import time
 import pandas as pd
+from datetime import datetime
 from typing import Dict
 from TwitterDataset import TwitterDataset
+from NewTwitterImgGenerator import Image2ImageGenerator
+from common.Config.Configs import PathConfig, LLMConfig
+from common.Utils import SentimentMapping
+from tqdm import tqdm
 
 class NewTwitterGenerator:
-    def __init__(self, api_key: str, dataset: TwitterDataset, output_dir: str, 
-                 api_url: str = "https://spark-api-open.xf-yun.com/v2/chat/completions",
-                 model: str = "x1",
-                 max_retries: int = 3):
+    def __init__(self, 
+                 dataset: TwitterDataset,
+        ):
         """
         初始化Twitter数据生成器
+        """
+        self.path_config = PathConfig()
+        self.llm_config = LLMConfig()
+        self.run_config = dataset.run_config
+        self.api_key = f"Bearer {self.llm_config.API_KEY}"
+        self.dataset = dataset
+        self.headers = {
+            'Authorization': self.api_key,
+            'content-type': "application/json"
+        }
+
+        # 创建输出目录（如果不存在）
+        os.makedirs(self.path_config.DATA_PATHS_TEXT_15and17[self.run_config.OUTPUT_TEXT], exist_ok=True)
+    
+    def generate_tweet_prompt(self, text: str, entity_polarity: Dict[str, str]) -> str:
+        """Generate a tweet paraphrasing prompt based on the original text and entity sentiment polarities"""
+        entity_pairs = ", ".join([f'"{entity}"—"{polarity}"' for entity, polarity in entity_polarity.items()])
         
-        参数:
+        return f"""
+        Rephrase this tweet: "{text}"
+        Keep entities with sentiments: {entity_pairs}
+        Rules: Only the paraphrased plain text (no explanations), same entity sentiments, similar length (slight expand if <8 words), same theme, keep retweet headers.
+        """
+    
+    def call_LLM_api(self, prompt: str) -> str:
+        """调用星火大模型API生成内容
+            参数:
             api_key: 大模型API密钥
             dataset: Twitter数据集处理器
             output_dir: 生成的输出目录
@@ -22,53 +51,10 @@ class NewTwitterGenerator:
             model: 使用的大模型
             max_retries: API调用失败时的最大重试次数
         """
-        self.api_key = f"Bearer {api_key}"
-        self.dataset = dataset
-        self.output_dir = output_dir
-        self.api_url = api_url
-        self.model = model
-        self.max_retries = max_retries
-        self.headers = {
-            'Authorization': self.api_key,
-            'content-type': "application/json"
-        }
-
-        # 情感标签映射（0→neg，1→neu，2→pos）
-        self.polarity_mapping = {
-            0: "negative",
-            1: "neutral",
-            2: "positive"
-        }
-        self.polarity_mapping_back = {
-            "negative": 0,
-            "neutral": 1,
-            "positive": 2
-        }
-
-        # 创建输出目录（如果不存在）
-        os.makedirs(output_dir, exist_ok=True)
-    
-    def generate_tweet_prompt(self, text: str, entity_polarity: Dict[str, str]) -> str:
-        """Generate a tweet paraphrasing prompt based on the original text and entity sentiment polarities"""
-        entity_pairs = ", ".join([f'"{entity}"—"{polarity}"' for entity, polarity in entity_polarity.items()])
-        
-        return f"""
-        (1) Task Description: Given an original Twitter text, along with its entities and their sentiment polarities, can you generate a new Twitter text that meets the requirements in (4)?
-        (2) Original Twitter Text: "{text}"
-        (3) Entities and Sentiment Polarities: {entity_pairs}
-        (4) Requirements: 1. The new text must be plain text and returned directly without any explanations or extra content. 
-                          2. Entities and their corresponding sentiment polarities must remain unchanged. 
-                          3. The text length should not be too long; if the original text is very short (fewer than 8 words), it can be appropriately expanded. 
-                          4. The themes of the old and new texts should be as similar as possible. 
-                          5. If there is a retweet header, it should be retained.
-        """
-    
-    def call_LLM_api(self, prompt: str) -> str:
-        """调用星火大模型API生成内容"""
-        for attempt in range(self.max_retries):
+        for attempt in range(self.llm_config.max_retries):
             try:
                 body = {
-                    "model": self.model,
+                    "model": self.llm_config.model_name,
                     "user": "user_id",
                     "messages": [
                         {"role": "system", "content": "你是一个专业的文本处理助手，擅长根据给定的指令生成和处理文本。"},
@@ -88,8 +74,7 @@ class NewTwitterGenerator:
                 full_response = ""  # 存储返回结果
                 isFirstContent = True  # 首帧标识
 
-                response = requests.post(url=self.api_url, json=body, headers=self.headers, stream=True)
-                print("响应头信息:", response.headers)
+                response = requests.post(url=self.llm_config.API_URL, json=body, headers=self.headers, stream=True)
                 for chunks in response.iter_lines():
                     # print(chunks)
                     if (chunks and '[DONE]' not in str(chunks)):
@@ -108,38 +93,35 @@ class NewTwitterGenerator:
             
             except requests.exceptions.RequestException as e:
                 wait_time = (2 ** attempt) + (attempt * 0.1)  # 指数退避
-                print(f"API请求失败 (尝试 {attempt + 1}/{self.max_retries}): {e}")
+                print(f"API请求失败 (尝试 {attempt + 1}/{self.llm_config.max_retries}): {e}")
                 print(f"等待 {wait_time:.2f} 秒后重试...")
                 time.sleep(wait_time)
         
-        raise Exception(f"API调用失败，已达到最大重试次数 ({self.max_retries})")
+        raise Exception(f"API调用失败，已达到最大重试次数 ({self.llm_config.max_retries})")
     
-    def generate_paraphrased_tweets(self, load_data: str, output_path: str) -> None:
+    def generate_tweets(self) -> None:
         """
-        根据实体情感极性生成改写的推文
+        根据实体情感极性生成改写的推特
         
-        参数:
-            load_data: 指定数据集， test、train、dev
-            output_path: 保存改写推文的文件路径
         """
-        # 加载数据集
-        self.dataset.load_data(load_data)
-        # print(type(self.dataset.data[load_data]))
-        # print(self.dataset.data[load_data])
-        df = self.dataset.data[load_data]
+        # 加载文本数据集
+        self.dataset.load_data_text()
+        df = self.dataset.data[self.run_config.INPUT_TEXT]
+
+        # 实例化DiffusionModel
+        generator_img = Image2ImageGenerator()
         
         # 遍历DataFrame
         all_paraphrased_tweets = []
         index = 0
         total_rows = len(df)
-        print(total_rows)
-        while index < total_rows:
-            print(index, '  :  ', index / total_rows)
+        for index in tqdm(range(total_rows), desc="处理进度", total=total_rows):
+
             row = df.loc[index]
             twitter_text_origin = row['#3 String']
             entity_polarity = {}
             entity = row['#3 String.1']
-            polarity = self.polarity_mapping.get(row['#1 Label']) #映射转换
+            polarity = SentimentMapping.num_to_label(row['#1 Label']) #映射转换
             entity_polarity[entity] = polarity
             twitter_text_needed = twitter_text_origin.replace("$T$", entity)
             # print(twitter_text_origin)
@@ -149,11 +131,12 @@ class NewTwitterGenerator:
                 index += 1
                 row = df.loc[index]
                 entity = row['#3 String.1']
-                polarity = self.polarity_mapping.get(row['#1 Label']) #映射转换
+                polarity = SentimentMapping.num_to_label(row['#1 Label']) #映射转换
                 entity_polarity[entity] = polarity
             # print(entity_polarity)
             # print(twitter_text_needed)
             
+            # 生成新推文
             try:
                 prompt = self.generate_tweet_prompt(twitter_text_needed, entity_polarity)
                 print(prompt)
@@ -167,7 +150,7 @@ class NewTwitterGenerator:
                 for entity, polarity in entity_polarity.items():
                     all_paraphrased_tweets.append({
                         'index': index_begin,
-                        '#1 Label': self.polarity_mapping_back.get(polarity),
+                        '#1 Label': SentimentMapping.label_to_num(polarity),
                         '#2 ImageID': df.loc[index_begin]['#2 ImageID'],
                         '#3 String': paraphrased_tweet.replace(entity, "$T$"),
                         '#3 String.1': entity
@@ -177,13 +160,24 @@ class NewTwitterGenerator:
                 print(f"处理推文 {index_begin} 时出错: {e}")
                 # 继续处理下一条推文
 
-            if index >= 1 : 
-                # print(all_paraphrased_tweets)
+            # 生成新图片
+            try:
+                edited_imgs = generator_img.generate_from_image_and_text(
+                    image = self.dataset.get_images(df.loc[index]['#2 ImageID']),
+                    prompt = f"accompanying image of \"{paraphrased_tweet}\""
+                )
+                self.dataset.save_images(edited_imgs, df.loc[index]['#2 ImageID'])
+            except Exception as e:
+                print(f"处理图片{index}时出错：{e}")
+            if index >= 3: 
                 break
             index += 1
 
         # 保存生成的改写推文
+        # 获取当前日期，格式化为年-月-日（例如：2025-08-27）
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        output_dir = os.path.join(self.path_config.DATA_PATHS_TEXT_15and17[self.run_config.OUTPUT_TEXT], f"paraphrased_tweets_{current_date}.tsv")
         dataframe = pd.DataFrame(all_paraphrased_tweets)
-        dataframe.to_csv(output_path, sep='\t', index=False)
+        dataframe.to_csv(output_dir, sep='\t', index=False)
         
-        print(f"已成功保存 {len(all_paraphrased_tweets)} 条改写的推文到 {output_path}")
+        print(f"已成功保存 {len(all_paraphrased_tweets)} 条改写的推文到 {output_dir}")

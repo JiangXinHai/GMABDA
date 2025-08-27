@@ -1,5 +1,5 @@
 python3.7 pretrain_trc.py \
-      --dataset TRC /home/zhouru/ABSA3/src/data/jsons/TRC_info.json \
+      --dataset TRC /home/jiangxinhai/GMABDA/Code/test/AoM/AoM-main/src/data/jsons/TRC_info.json \
       --checkpoint_dir ./checkpoint_dir \
       --model_config config/pretrain_base.json \
       --trc_enabled 1 \

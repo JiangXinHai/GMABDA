@@ -36,6 +36,9 @@ class MultiModalBartModel_AESC(PretrainedBartModel):
                     use_recur_pos=False,
                     tag_first=False):
         if args.bart_init:
+            print(bart_model)
+            print("当前模型缓存路径:", os.getenv("TRANSFORMERS_CACHE", "默认路径: ~/.cache/huggingface/hub/"))
+            print("-----------------------------------------------------------------------")
             model = BartModel.from_pretrained(bart_model)
             num_tokens, _ = model.encoder.embed_tokens.weight.shape
             print('num_tokens', num_tokens)

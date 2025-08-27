@@ -1,5 +1,8 @@
 #忽略所有.safetensors后缀文件（模型文件）
 *.safetensors
+*.bin
+*.pt
+*.pth
 
 #忽略所有.tsv\.txt\.img后缀文件（数据）
 *.tsv
@@ -7,3 +10,4 @@
 *.img
 *.jpg
 *.png
+*.log
