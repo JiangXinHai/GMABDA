@@ -1,8 +1,11 @@
-import os
-# 手动设置缓存路径（替换为你本地模型缓存的实际目录）
-os.environ["TRANSFORMERS_CACHE"] = "~/.cache/huggingface/hub/"
-# 或者直接指向模型所在的具体文件夹
-# os.environ["TRANSFORMERS_CACHE"] = "/path/to/your/local/models--facebook--bart-base/"
+from transformers import BartModel, BartTokenizer
 
-# 验证设置是否生效
-print("当前缓存路径:", os.getenv("TRANSFORMERS_CACHE"))
+local_path = "/home/jiangxinhai/GMABDA/Model/bart-base"
+
+# 测试加载分词器
+tokenizer = BartTokenizer.from_pretrained(local_path)
+print("✅ 分词器加载成功，词表大小：", tokenizer.vocab_size)
+
+# 测试加载模型
+model = BartModel.from_pretrained(local_path)
+print("✅ 模型加载成功，结构：", model.config)
