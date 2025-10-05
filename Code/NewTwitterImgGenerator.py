@@ -1,9 +1,10 @@
 from diffusers import StableDiffusionImg2ImgPipeline
 import torch
 from PIL import Image
-from common.Config.Configs import diffusionModel_config
-from common.Utils import logger
+from Code.common.Config.Configs import diffusionModel_config
+from Code.common.Utils import logger
 from torchvision import transforms  # PyTorch视觉库的预处理工具
+from peft import PeftModel
 
 class Image2ImageGenerator:
     """
@@ -24,8 +25,11 @@ class Image2ImageGenerator:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
+
+        # 确定数据类型
+        self.dtype = torch.float32
         
-        self.generator = torch.Generator("cuda").manual_seed(diffusionModel_config.SEED)
+        self.generator = torch.Generator(self.device).manual_seed(diffusionModel_config.SEED)
         torch.cuda.empty_cache()  # 清空CUDA缓存
 
         # 加载图生图管道
@@ -33,6 +37,13 @@ class Image2ImageGenerator:
             diffusionModel_config.MODEL_NAME,
             safety_checker=None
         ).to(self.device)
+
+        # 加载LoRA权重
+        self.img2img_pipeline.unet = PeftModel.from_pretrained(
+            self.img2img_pipeline.unet,
+            diffusionModel_config.LORA_SAVE_PATH + '/best_lora',
+            torch_dtype=self.dtype
+        )
 
         # 启用xFormers高效注意力
         try:
@@ -60,28 +71,13 @@ class Image2ImageGenerator:
         if isinstance(image, str):
             image = Image.open(image).convert("RGB")
         
-        # # 调整图像尺寸为模型所需的尺寸
-        # width, height = image.size
-        # new_width = (width // 8) * 8
-        # new_height = (height // 8) * 8
-        # image_resized = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        # logger.info(f"使用图像尺寸：{new_width}x{new_height}（原尺寸：{width}x{height}）")
+        # 调用尺寸调整方法
+        resized_image = self._resize_image(image)
 
-        # # PIL图像转PyTorch张量
-        # # - ToTensor()：将PIL图像（[0,255]）转为张量（[0,1]），并调整维度为(3, H, W)
-        # preprocess = transforms.Compose([
-        #     transforms.ToTensor(),
-        # ])
-        # image_tensor = preprocess(image_resized)  # 此时张量shape: (3, H, W)，值范围[-1,1]
-        
-        # # 转为半精度（减少内存）+ 增加batch维度 + 移到GPU
-        # image_tensor = image_tensor.to(torch.float16).unsqueeze(0).to("cuda")
-        # # 最终shape: (1, 3, H, W)，符合模型输入要求（batch=1，3通道，GPU张量）
-        
         with torch.no_grad():
             images = self.img2img_pipeline(
                 prompt = prompt,
-                image = image,
+                image = resized_image,
                 negative_prompt = diffusionModel_config.NEGATIVE_PROMPT,
                 strength = diffusionModel_config.STRENGTH,
                 num_inference_steps = diffusionModel_config.NUM_INFERENCE_STEPS,
@@ -91,3 +87,24 @@ class Image2ImageGenerator:
             ).images
 
         return images
+    
+    def _resize_image(self, image):
+        """调整图像尺寸：正方形则(512,512)，非正方形短边512"""
+        width, height = image.size
+        if width == height:
+            # 正方形，直接缩放到512x512
+            new_size = (512, 512)
+        else:
+            # 非正方形，短边为512，长边等比例缩放
+            if width < height:
+                new_width = 512
+                new_height = int(height * (512 / width))
+            else:
+                new_height = 512
+                new_width = int(width * (512 / height))
+            # 确保尺寸是8的倍数（Stable Diffusion要求）
+            new_width = (new_width // 8) * 8
+            new_height = (new_height // 8) * 8
+            new_size = (new_width, new_height)
+        logger.info(f"原图像尺寸：{width}x{height}，调整后尺寸：{new_size[0]}x{new_size[1]}")
+        return image.resize(new_size, Image.Resampling.LANCZOS)

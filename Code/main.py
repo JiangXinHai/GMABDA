@@ -1,5 +1,5 @@
-from TwitterDataset import TwitterDataset
-from NewTwitterGenerator import NewTwitterGenerator
+from Code.TwitterDataset import TwitterDataset
+from Code.NewTwitterGenerator import NewTwitterGenerator
 
 if __name__ == "__main__":
     # 创建数据集处理器

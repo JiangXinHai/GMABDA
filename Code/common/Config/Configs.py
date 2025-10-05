@@ -41,13 +41,42 @@ class DiffusionModelConfig:
         guidance_scale: 文本的引导尺度(1-20，越大影响越强)
         num_images: 生成图像数量
     """
-    MODEL_NAME = "Model/local_stable_diffusion_v1_5"
+    # ----------推理配置-----------#
+    MODEL_NAME = "/home/jiangxinhai/GMABDA/Model/local_stable_diffusion_v1_5"
     NEGATIVE_PROMPT = "blurry, low quality, distorted"
     STRENGTH = 0.8
     NUM_INFERENCE_STEPS = 50
     GUIDANCE_SCALE = 10
     NUM_IMAGES = 1
     SEED = 42
+
+    # ---------微调配置--------------#
+    # 1. 数据集配置
+    IMAGE_SIZE = 512  # 微调时图像统一尺寸（Stable Diffusion推荐512x512）
+    DATA_LOADER_WORKERS = 4  
+
+    # 2. LoRA配置
+    LORA_R = 16        # LoRA低秩矩阵维度（常用8/16）
+    LORA_ALPHA = 32   # 缩放因子（通常=2*R）
+    LORA_DROPOUT = 0.05  #  dropout比例
+    LORA_TARGET_MODULES = [  # SD v1.5需训练的注意力模块
+        "to_k", "to_q", "to_v", "to_out.0", "proj_in", "proj_out"
+    ]
+    LORA_SAVE_PATH = "/home/jiangxinhai/GMABDA/Code/diffusion_15and17_lora/save_lora"  # 微调后LoRA权重保存路径
+
+    # 3. 训练超参
+    BATCH_SIZE = 4    # 批次大小（根据显存调整，12GB卡推荐4）
+    EPOCHS = 10       # 训练轮次
+    LEARNING_RATE = 1e-4  # 学习率（LoRA常用1e-4~5e-4）
+    WEIGHT_DECAY = 1e-2   # 权重衰减（防止过拟合）
+    LOGGING_STEP = 10      # 每10步打印一次日志
+    SAVE_STEP = 100        # 每100步保存一次LoRA权重
+    
+    # 新增保存相关配置
+    SAVE_STRATEGY = "both"  # "steps", "epoch", "both"
+    SAVE_TOTAL_LIMIT = 3     # 最多保存的检查点数量
+    SAVE_BEST_ONLY = True    # 是否只保存最佳模型
+    RESUME_FROM_CHECKPOINT = None  # 从检查点恢复训练，如 "./lora_weights/best_checkpoint.pt"
 
 class RunConfig:
     INPUT_TEXT = "train_15"

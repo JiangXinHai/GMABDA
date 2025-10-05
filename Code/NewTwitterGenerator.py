@@ -6,12 +6,11 @@ import pandas as pd
 import re
 from datetime import datetime
 from typing import Dict, List, Tuple
-from TwitterDataset import TwitterDataset
-from NewTwitterImgGenerator import Image2ImageGenerator
-from common.Config.Configs import path_config, llm_config, run_config
-from common.Utils import SentimentMapping
+from Code.TwitterDataset import TwitterDataset
+from Code.NewTwitterImgGenerator import Image2ImageGenerator
+from Code.common.Config.Configs import path_config, llm_config, run_config
+from Code.common.Utils import SentimentMapping, logger, add_spaces_around_special_tokens
 from tqdm import tqdm
-from common.Utils import logger, add_spaces_around_special_tokens
 
 class NewTwitterGenerator:
     def __init__(self, 
@@ -319,7 +318,7 @@ class NewTwitterGenerator:
                     logger.info(f"【图片ID: {current_image_id}】开始生成图片")
                     edited_imgs = generator_img.generate_from_image_and_text(
                         image=self.dataset.get_images(current_image_id),
-                        prompt=f"accompanying image of \"{paraphrased_tweet}\" with undistorted, symmetric, proportional, straight lines, natural proportions."
+                        prompt=f"{paraphrased_tweet}"
                     )
 
                     # 5、判断图片生成结果是否正确
@@ -369,9 +368,9 @@ class NewTwitterGenerator:
                 pbar.update(upgrade_count)  # 更新进度条
                 
                 # 少量测试：处理100条数据后停止（可根据需求调整）
-                # if processed_count >= 50:
-                #     logger.info(f"测试模式：已处理50条数据，提前停止")
-                #     break
+                if processed_count >= 1000:
+                    logger.info(f"测试模式：已处理1000条数据，提前停止")
+                    break
 
         # 最终日志：输出总处理量和文件路径
         logger.info(f"生成完成！共处理 {processed_count} 条推文，已实时追加到 {self.output_tsv_path}")
