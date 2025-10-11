@@ -1,3 +1,6 @@
+import torch
+
+
 class PathConfig:
     # 推文路径
     DATA_PATHS_TEXT_15and17 = {
@@ -34,13 +37,6 @@ class LLMConfig:
     max_retries = 3
 
 class DiffusionModelConfig:
-    """
-        negative_prompt: 负面提示词
-        strength: 图像修改强度（0-1之间，值越大修改越明显）
-        num_inference_steps: 推理步数
-        guidance_scale: 文本的引导尺度(1-20，越大影响越强)
-        num_images: 生成图像数量
-    """
     # ----------推理配置-----------#
     MODEL_NAME = "/home/jiangxinhai/GMABDA/Model/local_stable_diffusion_v1_5"
     NEGATIVE_PROMPT = "blurry, low quality, distorted"
@@ -62,21 +58,34 @@ class DiffusionModelConfig:
     LORA_TARGET_MODULES = [  # SD v1.5需训练的注意力模块
         "to_k", "to_q", "to_v", "to_out.0", "proj_in", "proj_out"
     ]
-    LORA_SAVE_PATH = "/home/jiangxinhai/GMABDA/Code/diffusion_15and17_lora/save_lora"  # 微调后LoRA权重保存路径
+    LORA_SAVE_PATH = "/home/jiangxinhai/GMABDA/Code/diffusion_fine_tune/save_checkpoint"  # 微调后LoRA权重保存路径
 
     # 3. 训练超参
-    BATCH_SIZE = 4    # 批次大小（根据显存调整，12GB卡推荐4）
-    EPOCHS = 10       # 训练轮次
-    LEARNING_RATE = 1e-4  # 学习率（LoRA常用1e-4~5e-4）
-    WEIGHT_DECAY = 1e-2   # 权重衰减（防止过拟合）
+    BATCH_SIZE = 8    # 批次大小（根据显存调整，12GB卡推荐4）
+    EPOCHS = 50       # 训练轮次
+    LEARNING_RATE = 9e-5     # 生成器学习率（判别器为2倍）
+    WEIGHT_DECAY = 1e-2       # 生成器权重衰减
+    WEIGHT_DECAY_DISC = 1e-3  # 判别器权重衰减
     LOGGING_STEP = 10      # 每10步打印一次日志
     SAVE_STEP = 100        # 每100步保存一次LoRA权重
-    
+    DEVICE = "cuda"
+    DTYPE = ""
+
+    # GAN损失权重
+    LAMBDA_GAN = 0.2          # GAN损失权重
+    LAMBDA_MATCH = 1.0        # 图文匹配损失权重
+    LAMBDA_GP = 10            # R1梯度惩罚权重
+
     # 新增保存相关配置
     SAVE_STRATEGY = "both"  # "steps", "epoch", "both"
-    SAVE_TOTAL_LIMIT = 3     # 最多保存的检查点数量
+    SAVE_TOTAL_LIMIT = 2     # 最多保存的检查点数量
     SAVE_BEST_ONLY = True    # 是否只保存最佳模型
     RESUME_FROM_CHECKPOINT = None  # 从检查点恢复训练，如 "./lora_weights/best_checkpoint.pt"
+
+    # 临时配置
+    NUM_TRAIN_TIMESTEPS=1000
+    BETA_START=0.0001
+    BETA_END=0.02
 
 class RunConfig:
     INPUT_TEXT = "train_15"

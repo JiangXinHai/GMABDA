@@ -1,3 +1,6 @@
+# 纯微调扩散模型，无GAN，已经弃用
+
+
 import warnings
 warnings.filterwarnings("ignore")
 import os
@@ -35,6 +38,11 @@ class LoRATrainer:
             use_safetensors=True
         ).to(self.device)
 
+        # 冻结 VAE
+        self.vae.requires_grad_(False)
+        # 冻结文本编码器
+        self.pipeline.text_encoder.requires_grad_(False)
+        
         # 3. LoRA 配置
         self.lora_config = LoraConfig(
             r=diffusionModel_config.LORA_R,
@@ -88,7 +96,7 @@ class LoRATrainer:
         with torch.no_grad():
             image_tensor = image_tensor.to(dtype=self.dtype)
             encoding = self.vae.encode(image_tensor)
-            latent = encoding.latent_dist.sample()
+            latent = encoding.latent_dist.mean
         latent = latent * 0.18215  # Stable Diffusion 官方缩放因子
         return latent
     
@@ -106,8 +114,25 @@ class LoRATrainer:
             input_imgs = batch["input_image"].to(self.device)
             prompts = batch["text_prompt"]
 
-            # 新增：图像 -> latent（4 通道）
+            # 图像 -> latent（4 通道）
+            if step == 0 and epoch == 0:  # 只在第一次迭代检测
+                print("\n===== 输入图像检测 =====")
+                print(f"dtype: {input_imgs.dtype}")
+                print(f"shape: {input_imgs.shape}")
+                print(f"min: {input_imgs.min().item():.4f}")
+                print(f"max: {input_imgs.max().item():.4f}")
+                print(f"mean: {input_imgs.mean().item():.4f}")
+                print(f"std: {input_imgs.std().item():.4f}")
+                print("=======================\n")
             latents = self.image_to_latent(input_imgs)
+            if step == 0 and epoch == 0:  # 只在第一次迭代检测
+                print("\n===== Latent 检测 =====")
+                print(f"Latent shape: {latents.shape}")
+                print(f"Min: {latents.min().item():.4f}")
+                print(f"Max: {latents.max().item():.4f}")
+                print(f"Mean: {latents.mean().item():.4f}")
+                print(f"Std: {latents.std().item():.4f}")
+                print("=======================\n")
 
             # 文本编码
             text_inputs = self.pipeline.tokenizer(

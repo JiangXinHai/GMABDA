@@ -3,4 +3,4 @@ Data/
 Code/test/
 Model/
 Logs/
-Code/diffusion_15and17_lora/save_lora
+Code/diffusion_fine_tune/save_lora

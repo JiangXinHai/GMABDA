@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import os
 import torch
@@ -79,25 +80,51 @@ class TwitterDataset(Dataset):  # 继承PyTorch的Dataset，同时保留原有�
         ])
 
     def _load_train_val_text_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """微调模式：加载train_15和dev_15文本数据（从PathConfig读取路径）"""
+        """微调模式：加载 train_15 和 dev_15 文本数据（TSV 结构化数据）"""
         logger.info("开始加载微调文本数据（train_15 + dev_15）...")
-        # 从PathConfig获取train_15和dev_15的路径
+
+        # 1. 获取路径
         try:
             train_path = path_config.DATA_PATHS_TEXT_15and17["train_15"]
             val_path = path_config.DATA_PATHS_TEXT_15and17["dev_15"]
         except KeyError as e:
-            raise KeyError(f"PathConfig.DATA_PATHS_TEXT_15and17中缺少键：{e}（需确保包含'train_15'和'dev_15'）")
+            raise KeyError(f"PathConfig.DATA_PATHS_TEXT_15and17 中缺少键：{e}（需确保包含 'train_15' 和 'dev_15'）")
 
-        # 读取TSV文件（分隔符为'\t'）
+        # 2. 读取 TSV（指定列名，避免原始列名带空格/特殊字符）
         try:
-            train_df = pd.read_csv(train_path, sep='\t')
-            val_df = pd.read_csv(val_path, sep='\t')
+            train_df = pd.read_csv(
+                train_path,
+                sep='\t',
+                header=0,
+                names=['index', 'label', 'image_id', 'tweet_template', 'entity']
+            )
+            val_df = pd.read_csv(
+                val_path,
+                sep='\t',
+                header=0,
+                names=['index', 'label', 'image_id', 'tweet_template', 'entity']
+            )
         except Exception as e:
             raise RuntimeError(f"读取TSV文件失败：{e}（请检查文件路径或格式）")
 
-        # 日志输出数据量
-        logger.info(f"成功加载：train_15({len(train_df)}条)，dev_15({len(val_df)}条)")
-        return train_df, val_df
+        # 3. 替换 $T$ 为实体，生成真实推文
+        train_df['tweet_template'] = train_df['tweet_template'].fillna("")
+        train_df['entity'] = train_df['entity'].fillna("")
+        train_df['text'] = train_df.apply(lambda row: row['tweet_template'].replace("$T$", row['entity']), axis=1)
+
+        val_df['tweet_template'] = val_df['tweet_template'].fillna("")
+        val_df['entity'] = val_df['entity'].fillna("")
+        val_df['text'] = val_df.apply(lambda row: row['tweet_template'].replace("$T$", row['entity']), axis=1)
+
+        # 4. 按 image_id 去重（保留第一条）
+        train_df = train_df.drop_duplicates(subset=['image_id'], keep='first').reset_index(drop=True)
+        val_df = val_df.drop_duplicates(subset=['image_id'], keep='first').reset_index(drop=True)
+
+        # 5. 日志输出
+        logger.info(f"成功加载并处理：train_15({len(train_df)}条)，dev_15({len(val_df)}条)")
+
+        # 6. 返回只保留需要的列（image_id 和 text）
+        return train_df[['image_id', 'text']], val_df[['image_id', 'text']]
     
     def _align_text_image(self, text_df: pd.DataFrame, split: str = "train") -> List[Dict]:
         """
@@ -115,8 +142,8 @@ class TwitterDataset(Dataset):  # 继承PyTorch的Dataset，同时保留原有�
 
         # 遍历文本数据，关联图像
         for idx, row in text_df.iterrows():
-            img_filename = str(row["#2 ImageID"])  # 图像文件名（如"123.jpg"）
-            text_prompt = str(row["#3 String"]).replace("$T$", str(row["#3 String.1"]))  # 文本提示（推文内容）
+            img_filename = str(row["image_id"])  # 图像文件名（如"123.jpg"）
+            text_prompt = str(row["text"])       # 文本提示（推文内容）
 
             # 跳过空文本或空文件名
             if not img_filename or not text_prompt:
@@ -255,6 +282,9 @@ class TwitterDataset(Dataset):  # 继承PyTorch的Dataset，同时保留原有�
         """
         if not self.is_train:
             raise ValueError("需初始化微调模式（is_train=True）才能构建DataLoader！")
+        
+        g = torch.Generator()
+        g.manual_seed(diffusionModel_config.SEED)
 
         # 训练DataLoader（shuffle=True）
         train_loader = DataLoader(
@@ -263,7 +293,9 @@ class TwitterDataset(Dataset):  # 继承PyTorch的Dataset，同时保留原有�
             shuffle=True,
             num_workers=diffusionModel_config.DATA_LOADER_WORKERS,
             pin_memory=True,  # 锁存内存（加速GPU数据传输）
-            drop_last=True  # 丢弃最后一个不完整批次（避免训练报错）
+            drop_last=True,  # 丢弃最后一个不完整批次（避免训练报错）
+            worker_init_fn=lambda worker_id: np.random.seed(diffusionModel_config.SEED + worker_id),
+            generator=g
         )
 
         # 验证DataLoader（shuffle=False）
@@ -272,7 +304,9 @@ class TwitterDataset(Dataset):  # 继承PyTorch的Dataset，同时保留原有�
             batch_size=diffusionModel_config.BATCH_SIZE,
             shuffle=False,
             num_workers=diffusionModel_config.DATA_LOADER_WORKERS,
-            pin_memory=True
+            pin_memory=True,
+            worker_init_fn=lambda worker_id: np.random.seed(diffusionModel_config.SEED + worker_id),
+            generator=g
         )
 
         logger.info(f"DataLoader构建完成：训练批次数{len(train_loader)}，验证批次数{len(val_loader)}（批次大小：{diffusionModel_config.BATCH_SIZE}）")

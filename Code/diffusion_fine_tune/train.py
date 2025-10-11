@@ -1,5 +1,7 @@
 import os
 import argparse
+import random
+import numpy as np
 import torch
 from lora_trainer import LoRATrainer
 from Code.common.Config.Configs import diffusionModel_config, run_config, path_config
@@ -21,6 +23,19 @@ def check_environment(args):
     logger.info(f"输出目录准备就绪: {diffusionModel_config.LORA_SAVE_PATH}")
 
 
+def set_seed(seed: int):
+    """固定所有可能影响结果的随机种子"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # 多GPU也适用
+    # 以下两项是保证 CUDA 卷积算法确定性
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    # 固定 diffusers 内部随机性
+    import diffusers
+    diffusers.utils.set_seed(seed)
+    
 if __name__ == "__main__":
     # 1. 命令行参数解析
     parser = argparse.ArgumentParser(description="LoRA 微调 Stable Diffusion (Twitter15 数据集)")

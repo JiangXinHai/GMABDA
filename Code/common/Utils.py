@@ -3,6 +3,10 @@ import logging
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 import re
+import glob
+import re
+import shutil
+import torch
 
 class SentimentMapping:
     """情感标签映射工具类（静态方法版），无需实例化即可使用"""
@@ -101,3 +105,74 @@ def setup_logger():
 # 初始化日志（项目启动时自动执行，全局只需初始化一次）
 logger = setup_logger()
     
+
+class CheckpointUtils:
+    @staticmethod
+    def should_save_step(step, config):
+        if config.SAVE_STRATEGY == "steps" or config.SAVE_STRATEGY == "both":
+            return (step + 1) % config.SAVE_STEP == 0
+        return False
+
+    @staticmethod
+    def should_save_epoch(config):
+        return config.SAVE_STRATEGY in ["epoch", "both"]
+
+    @staticmethod
+    def save_checkpoint(base_path, model, optimizer, scaler, epoch, step, global_step, best_loss, lora_config, is_best=False):
+        checkpoint = {
+            'epoch': epoch,
+            'step': step,
+            'global_step': global_step,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'best_loss': best_loss,
+            'lora_config': lora_config,
+            'scaler_state_dict': scaler.state_dict() if scaler else None,
+        }
+        torch.save(checkpoint, f"{base_path}_checkpoint.pt")
+        logger.info(f"完整检查点已保存: {base_path}_checkpoint.pt")
+
+    @staticmethod
+    def save_lora_weights(base_path, model):
+        model.save_pretrained(f"{base_path}_lora")
+        logger.info(f"LoRA权重已保存: {base_path}_lora")
+
+    @staticmethod
+    def load_checkpoint(checkpoint_path, model, optimizer, scaler, device):
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if scaler and checkpoint.get('scaler_state_dict'):
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        return checkpoint['epoch'], checkpoint['step'], checkpoint.get('global_step', 0), checkpoint.get('best_loss', float('inf'))
+
+    @staticmethod
+    def cleanup_old_checkpoints(save_dir, keep_last_n=5):
+        checkpoint_files = glob.glob(f"{save_dir}/epoch_*_checkpoint.pt") + \
+                           glob.glob(f"{save_dir}/step_*_checkpoint.pt")
+        
+        checkpoint_files = [f for f in checkpoint_files if "best" not in os.path.basename(f)]
+
+        def extract_number(filename):
+            match = re.search(r'(epoch|step)_(\d+)', filename)
+            return int(match.group(2)) if match else 0
+
+        checkpoint_files.sort(key=extract_number)
+
+        if len(checkpoint_files) > keep_last_n:
+            for old_file in checkpoint_files[:-keep_last_n]:
+                try:
+                    os.remove(old_file)
+                    lora_dir = old_file.replace('_checkpoint.pt', '_lora')
+                    if os.path.exists(lora_dir):
+                        shutil.rmtree(lora_dir)
+                    logger.info(f"已清理旧检查点: {old_file}")
+                except Exception as e:
+                    logger.warning(f"清理检查点失败 {old_file}: {e}")
+
+    @staticmethod
+    def load_lora_weights(model, lora_path):
+        if not os.path.exists(lora_path):
+            raise FileNotFoundError(f"LoRA权重文件不存在: {lora_path}")
+        from peft import PeftModel
+        return PeftModel.from_pretrained(model, lora_path)
