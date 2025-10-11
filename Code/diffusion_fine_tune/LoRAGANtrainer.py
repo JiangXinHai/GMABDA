@@ -34,6 +34,8 @@ class LoRAGANTrainer:
             config.MODEL_NAME,
             subfolder="scheduler"
         )
+        # 关键：确保调度器的prediction_type与生成器一致（默认"epsilon"，与SD匹配）
+        self.noise_scheduler.config.prediction_type = "epsilon"
 
         # -------------------------- 新增：TensorBoard 初始化 --------------------------
         # TensorBoard 日志保存路径
@@ -162,16 +164,22 @@ class LoRAGANTrainer:
         with torch.no_grad():  # 生成假图像时不计算生成器梯度
             # 扩散过程：加噪声→UNet预测噪声→去噪得到假latent
             noise = torch.randn_like(real_latents)
-            timesteps = torch.randint(
+            timestep_scalar = torch.randint(
                 0, self.noise_scheduler.config.num_train_timesteps,
-                (real_latents.shape[0],), device=self.device
-            ).long()
-            print("timesteps:", timesteps)
-            print("timesteps.shape:", timesteps.shape)
-            print("timesteps.dtype:", timesteps.dtype)
-            noisy_latents = self.noise_scheduler.add_noise(real_latents, noise, timesteps)
-            noise_pred = self.generator.predict_noise(noisy_latents, timesteps, text_embeds).sample
-            fake_latents = self.noise_scheduler.step(noise_pred, timesteps, noisy_latents, return_dict=False)[0]
+                size=(), device=self.device
+            ).item()
+            timestep_batch = torch.tensor([timestep_scalar] * real_latents.shape[0], device=self.device)
+
+            noisy_latents = self.noise_scheduler.add_noise(real_latents, noise, timestep_batch)
+            noise_pred = self.generator.predict_noise(noisy_latents, timestep_batch, text_embeds).sample
+            # 关键3：调用step时传入「标量时间步」，获取去噪后的latent
+            denoise_out = self.noise_scheduler.step(
+                model_output=noise_pred,
+                timestep=timestep_scalar,  # 传入标量（适配单时间步step）
+                sample=noisy_latents,
+                return_dict=True  # 显式返回字典，避免元组格式不匹配
+            )
+            fake_latents = denoise_out.prev_sample  # 从返回字典中取prev_sample
 
             # latent→图像（用于判别器输入）
             fake_imgs = self.generator.latent_to_image(fake_latents)  # [B,3,H,W]
@@ -213,7 +221,7 @@ class LoRAGANTrainer:
         else:
             total_loss.backward()  # 普通精度：直接反向传播
             self.optimizer_disc.step()
- # -------------------------- 新增：记录判别器损失到TensorBoard --------------------------
+ # -------------------------- 记录判别器损失到TensorBoard --------------------------
         self.tb_writer.add_scalar("Discriminator/Total_Loss", total_loss.item(), self.global_step)
         self.tb_writer.add_scalar("Discriminator/GAN_Loss", loss_gan.item(), self.global_step)
         self.tb_writer.add_scalar("Discriminator/Match_Loss", loss_match.item(), self.global_step)
@@ -237,15 +245,27 @@ class LoRAGANTrainer:
 
         # 3. 扩散过程（核心：预测噪声）
         noise = torch.randn_like(real_latents)  # 生成随机噪声
-        timesteps = torch.randint(
+        # 生成「单时间步标量」（批量内所有样本用同一时间步）
+        timestep_scalar = torch.randint(
             0, self.noise_scheduler.config.num_train_timesteps,
-            (real_latents.shape[0],), device=self.device
-        ).long()
-        noisy_latents = self.noise_scheduler.add_noise(real_latents, noise, timesteps)  # 加噪声
+            size=(),  # 生成标量
+            device=self.device
+        ).item()  # 转为Python int
+        
+        # 生成「同一时间步的批量张量」（用于add_noise）
+        timestep_batch = torch.tensor([timestep_scalar] * real_latents.shape[0], device=self.device)
+        noisy_latents = self.noise_scheduler.add_noise(real_latents, noise, timestep_batch)  # 加噪声
 
         # 4. 生成器前向传播（UNet预测噪声 + 生成假图像）
-        noise_pred = self.generator.predict_noise(noisy_latents, timesteps, text_embeds).sample
-        fake_latents = self.noise_scheduler.step(noise_pred, timesteps, noisy_latents, return_dict=False)[0]
+        noise_pred = self.generator.predict_noise(noisy_latents, timestep_batch, text_embeds).sample
+        # 调用step时传入「标量时间步」，获取去噪后的latent
+        denoise_out = self.noise_scheduler.step(
+            model_output=noise_pred,
+            timestep=timestep_scalar,  # 传入标量（适配单时间步step）
+            sample=noisy_latents,
+            return_dict=True  # 显式返回字典，避免元组格式不匹配
+        )
+        fake_latents = denoise_out.prev_sample  # 从返回字典中取prev_sample
         fake_imgs = self.generator.latent_to_image(fake_latents)
 
         # 5. 计算生成器损失
@@ -388,15 +408,27 @@ class LoRAGANTrainer:
                 real_latents = self.generator.image_to_latent(input_imgs)
                 text_embeds = self.generator.get_text_embeddings(prompts)
                 noise = torch.randn_like(real_latents)
-                timesteps = torch.randint(
+                # 生成「单时间步标量」（批量内所有样本用同一时间步）
+                timestep_scalar = torch.randint(
                     0, self.noise_scheduler.config.num_train_timesteps,
-                    (real_latents.shape[0],), device=self.device
-                ).long()
-                noisy_latents = self.noise_scheduler.add_noise(real_latents, noise, timesteps)
+                    size=(),  # 生成标量
+                    device=self.device
+                ).item()  # 转为Python int
+                
+                # 生成「同一时间步的批量张量」（用于add_noise）
+                timestep_batch = torch.tensor([timestep_scalar] * real_latents.shape[0], device=self.device)
+                noisy_latents = self.noise_scheduler.add_noise(real_latents, noise, timestep_batch)
 
                 # 生成器前向传播
-                noise_pred = self.generator.predict_noise(noisy_latents, timesteps, text_embeds).sample
-                fake_latents = self.noise_scheduler.step(noise_pred, timesteps, noisy_latents, return_dict=False)[0]
+                noise_pred = self.generator.predict_noise(noisy_latents, timestep_batch, text_embeds).sample
+                # 调用step时传入「标量时间步」，获取去噪后的latent
+                denoise_out = self.noise_scheduler.step(
+                    model_output=noise_pred,
+                    timestep=timestep_scalar,  # 传入标量（适配单时间步step）
+                    sample=noisy_latents,
+                    return_dict=True  # 显式返回字典
+                )
+                fake_latents = denoise_out.prev_sample
                 fake_imgs = self.generator.latent_to_image(fake_latents)
 
                 # 计算验证损失（与训练时生成器损失一致）

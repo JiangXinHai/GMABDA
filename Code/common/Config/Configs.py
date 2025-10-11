@@ -61,7 +61,7 @@ class DiffusionModelConfig:
     LORA_SAVE_PATH = "/home/jiangxinhai/GMABDA/Code/diffusion_fine_tune/save_checkpoint"  # 微调后LoRA权重保存路径
 
     # 3. 训练超参
-    BATCH_SIZE = 8    # 批次大小（根据显存调整，12GB卡推荐4）
+    BATCH_SIZE = 4    # 批次大小（根据显存调整，12GB卡推荐4）
     EPOCHS = 50       # 训练轮次
     LEARNING_RATE = 9e-5     # 生成器学习率（判别器为2倍）
     WEIGHT_DECAY = 1e-2       # 生成器权重衰减
